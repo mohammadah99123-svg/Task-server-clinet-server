@@ -8,16 +8,16 @@ It handles authentication, task management, and task tracking through a centrali
 - User authentication for students and teachers
 - Centralized task management (Create, Read, Update, Delete)
 - Task completion tracking
-- Local data storage using SQLite or JSON
+- Local data storage
 
 ## Architecture
 - Server: Handles client requests and manages data storage
 - Clients: User interface applications that communicate with the server
 
 ## Technologies
-- Python
+- javascript
 - Socket Programming
-- SQLite or JSON
+- MYSQL
 - REST-like API design
 
 ## API Endpoints
