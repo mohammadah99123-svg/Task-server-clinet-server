@@ -1,0 +1,150 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
+
+void print_menu();
+void send_request(int socket, char* request);
+void receive_response(int socket);
+
+int main() {
+    int client_socket;
+    struct sockaddr_in server_addr;
+    char request[BUFFER_SIZE];
+    int choice;
+    char title[100], author[50], isbn[20], name[50], email[100], search_term[100];
+    int book_id, user_id;
+
+    // Create socket
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket < 0) {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    // Setup server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    // Connect to server
+    if (connect(client_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Connection failed");
+        exit(1);
+    }
+
+    printf("Connected to Library Server\n");
+    printf("Welcome to the Digital Library System!\n\n");
+
+    while (1) {
+        print_menu();
+        printf("Enter your choice: ");
+        scanf("%d", &choice);
+
+        switch (choice) {
+            case 1:
+                strcpy(request, "LIST");
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 2:
+                printf("Enter search term (title or author): ");
+                scanf("%s", search_term);
+                sprintf(request, "SEARCH %s", search_term);
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 3:
+                printf("Enter book ID to borrow: ");
+                scanf("%d", &book_id);
+                printf("Enter your user ID: ");
+                scanf("%d", &user_id);
+                sprintf(request, "BORROW %d %d", book_id, user_id);
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 4:
+                printf("Enter book ID to return: ");
+                scanf("%d", &book_id);
+                printf("Enter your user ID: ");
+                scanf("%d", &user_id);
+                sprintf(request, "RETURN %d %d", book_id, user_id);
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 5:
+                printf("Enter book title: ");
+                scanf("%s", title);
+                printf("Enter author name: ");
+                scanf("%s", author);
+                printf("Enter ISBN: ");
+                scanf("%s", isbn);
+                sprintf(request, "ADD_BOOK %s %s %s", title, author, isbn);
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 6:
+                printf("Enter your name: ");
+                scanf("%s", name);
+                printf("Enter your email: ");
+                scanf("%s", email);
+                sprintf(request, "REGISTER %s %s", name, email);
+                send_request(client_socket, request);
+                receive_response(client_socket);
+                break;
+
+            case 7:
+                printf("Thank you for using the Library System!\n");
+                close(client_socket);
+                exit(0);
+
+            default:
+                printf("Invalid choice. Please try again.\n");
+        }
+
+        printf("\nPress Enter to continue...");
+        getchar();
+        getchar();
+    }
+
+    close(client_socket);
+    return 0;
+}
+
+void print_menu() {
+    printf("\n=== LIBRARY MANAGEMENT SYSTEM ===\n");
+    printf("1. List all books\n");
+    printf("2. Search books\n");
+    printf("3. Borrow a book\n");
+    printf("4. Return a book\n");
+    printf("5. Add a new book\n");
+    printf("6. Register new user\n");
+    printf("7. Exit\n");
+    printf("================================\n");
+}
+
+void send_request(int socket, char* request) {
+    send(socket, request, strlen(request), 0);
+}
+
+void receive_response(int socket) {
+    char buffer[BUFFER_SIZE * 4];
+    memset(buffer, 0, sizeof(buffer));
+    
+    int bytes_received = recv(socket, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received > 0) {
+        buffer[bytes_received] = '\0';
+        printf("\n%s", buffer);
+    }
+}

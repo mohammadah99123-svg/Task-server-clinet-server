@@ -1,0 +1,15 @@
+Library Management System (Client-Server)
+
+Core Functions:
+Book Management: Add, edit, delete, and search books by title, author, or ISBN.
+Loan Management: Borrow books and record loan dates and expected return dates.
+User Management: Register readers and manage different user roles and permissions such as Reader, Librarian, and Administrator.
+Overdue Tracking: Generate alerts for overdue books and calculate fines.
+Reservation System: Allow users to reserve books that are currently on loan.
+Reporting: Generate statistics on book loans, most requested books, and active users.
+
+Additional Features:
+Waiting Lists: Manage queues for highly demanded books.
+Book Ratings and Reviews: Allow readers to rate and review books.
+Notifications: Send return-date reminders via email.
+Advanced Cataloging: Classify books by subject, language, and publication year.

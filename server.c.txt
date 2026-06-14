@@ -1,0 +1,385 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <time.h>
+
+#define PORT 8080
+#define MAX_CLIENTS 10
+#define MAX_BOOKS 1000
+#define MAX_USERS 100
+#define BUFFER_SIZE 1024
+
+// Book structure
+typedef struct {
+    int id;
+    char title[100];
+    char author[50];
+    char isbn[20];
+    int available;  // 1 if available, 0 if borrowed
+    int borrowed_by; // user_id who borrowed it
+    time_t borrow_date;
+} Book;
+
+// User structure
+typedef struct {
+    int id;
+    char name[50];
+    char email[100];
+    int borrowed_count;
+} User;
+
+// Global data
+Book books[MAX_BOOKS];
+User users[MAX_USERS];
+int book_count = 0;
+int user_count = 0;
+pthread_mutex_t data_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Function prototypes
+void initialize_data();
+void* handle_client(void* client_socket);
+void process_request(int client_socket, char* request);
+void send_response(int client_socket, char* response);
+void list_books(int client_socket);
+void search_books(int client_socket, char* query);
+void borrow_book(int client_socket, int book_id, int user_id);
+void return_book(int client_socket, int book_id, int user_id);
+void add_book(int client_socket, char* title, char* author, char* isbn);
+void register_user(int client_socket, char* name, char* email);
+
+int main() {
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    pthread_t thread_id;
+
+    // Initialize library data
+    initialize_data();
+
+    // Create socket
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    // Set socket options
+    int opt = 1;
+    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    // Setup server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    // Bind socket
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Bind failed");
+        exit(1);
+    }
+
+    // Listen for connections
+    if (listen(server_socket, MAX_CLIENTS) < 0) {
+        perror("Listen failed");
+        exit(1);
+    }
+
+    printf("Library Server started on port %d\n", PORT);
+    printf("Waiting for client connections...\n");
+
+    while (1) {
+        client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &client_len);
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        printf("New client connected\n");
+
+        // Create thread for each client
+        if (pthread_create(&thread_id, NULL, handle_client, (void*)&client_socket) != 0) {
+            perror("Thread creation failed");
+            close(client_socket);
+        }
+
+        pthread_detach(thread_id);
+    }
+
+    close(server_socket);
+    return 0;
+}
+
+void initialize_data() {
+    // Initialize some sample books
+    strcpy(books[0].title, "The C Programming Language");
+    strcpy(books[0].author, "Dennis Ritchie");
+    strcpy(books[0].isbn, "978-0131103627");
+    books[0].id = 1;
+    books[0].available = 1;
+    books[0].borrowed_by = 0;
+    
+    strcpy(books[1].title, "Data Structures and Algorithms");
+    strcpy(books[1].author, "Thomas Cormen");
+    strcpy(books[1].isbn, "978-0262033848");
+    books[1].id = 2;
+    books[1].available = 1;
+    books[1].borrowed_by = 0;
+
+    strcpy(books[2].title, "Computer Networks");
+    strcpy(books[2].author, "Andrew Tanenbaum");
+    strcpy(books[2].isbn, "978-0132126953");
+    books[2].id = 3;
+    books[2].available = 0;
+    books[2].borrowed_by = 1;
+    books[2].borrow_date = time(NULL);
+
+    book_count = 3;
+
+    // Initialize sample user
+    strcpy(users[0].name, "Ahmad Ali");
+    strcpy(users[0].email, "ahmad@email.com");
+    users[0].id = 1;
+    users[0].borrowed_count = 1;
+    user_count = 1;
+}
+
+void* handle_client(void* arg) {
+    int client_socket = *((int*)arg);
+    char buffer[BUFFER_SIZE];
+    
+    while (1) {
+        memset(buffer, 0, BUFFER_SIZE);
+        int bytes_received = recv(client_socket, buffer, BUFFER_SIZE - 1, 0);
+        
+        if (bytes_received <= 0) {
+            printf("Client disconnected\n");
+            break;
+        }
+
+        buffer[bytes_received] = '\0';
+        printf("Received: %s\n", buffer);
+        
+        process_request(client_socket, buffer);
+    }
+
+    close(client_socket);
+    return NULL;
+}
+
+void process_request(int client_socket, char* request) {
+    char command[20];
+    char param1[100], param2[100], param3[100];
+    int book_id, user_id;
+
+    sscanf(request, "%s", command);
+
+    if (strcmp(command, "LIST") == 0) {
+        list_books(client_socket);
+    }
+    else if (strcmp(command, "SEARCH") == 0) {
+        sscanf(request, "%s %s", command, param1);
+        search_books(client_socket, param1);
+    }
+    else if (strcmp(command, "BORROW") == 0) {
+        sscanf(request, "%s %d %d", command, &book_id, &user_id);
+        borrow_book(client_socket, book_id, user_id);
+    }
+    else if (strcmp(command, "RETURN") == 0) {
+        sscanf(request, "%s %d %d", command, &book_id, &user_id);
+        return_book(client_socket, book_id, user_id);
+    }
+    else if (strcmp(command, "ADD_BOOK") == 0) {
+        sscanf(request, "%s %s %s %s", command, param1, param2, param3);
+        add_book(client_socket, param1, param2, param3);
+    }
+    else if (strcmp(command, "REGISTER") == 0) {
+        sscanf(request, "%s %s %s", command, param1, param2);
+        register_user(client_socket, param1, param2);
+    }
+    else {
+        send_response(client_socket, "ERROR: Unknown command\n");
+    }
+}
+
+void send_response(int client_socket, char* response) {
+    send(client_socket, response, strlen(response), 0);
+}
+
+void list_books(int client_socket) {
+    char response[BUFFER_SIZE * 4];
+    char temp[200];
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    strcpy(response, "=== LIBRARY BOOKS ===\n");
+    for (int i = 0; i < book_count; i++) {
+        sprintf(temp, "ID: %d | Title: %s | Author: %s | Status: %s\n",
+                books[i].id, books[i].title, books[i].author,
+                books[i].available ? "Available" : "Borrowed");
+        strcat(response, temp);
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
+
+void search_books(int client_socket, char* query) {
+    char response[BUFFER_SIZE * 2];
+    char temp[200];
+    int found = 0;
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    strcpy(response, "=== SEARCH RESULTS ===\n");
+    for (int i = 0; i < book_count; i++) {
+        if (strstr(books[i].title, query) != NULL || 
+            strstr(books[i].author, query) != NULL) {
+            sprintf(temp, "ID: %d | Title: %s | Author: %s | Status: %s\n",
+                    books[i].id, books[i].title, books[i].author,
+                    books[i].available ? "Available" : "Borrowed");
+            strcat(response, temp);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        strcat(response, "No books found matching your search.\n");
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
+
+void borrow_book(int client_socket, int book_id, int user_id) {
+    char response[200];
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    int book_index = -1;
+    for (int i = 0; i < book_count; i++) {
+        if (books[i].id == book_id) {
+            book_index = i;
+            break;
+        }
+    }
+    
+    if (book_index == -1) {
+        strcpy(response, "ERROR: Book not found\n");
+    }
+    else if (!books[book_index].available) {
+        strcpy(response, "ERROR: Book is already borrowed\n");
+    }
+    else {
+        books[book_index].available = 0;
+        books[book_index].borrowed_by = user_id;
+        books[book_index].borrow_date = time(NULL);
+        
+        // Update user's borrowed count
+        for (int i = 0; i < user_count; i++) {
+            if (users[i].id == user_id) {
+                users[i].borrowed_count++;
+                break;
+            }
+        }
+        
+        sprintf(response, "SUCCESS: Book '%s' borrowed successfully\n", 
+                books[book_index].title);
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
+
+void return_book(int client_socket, int book_id, int user_id) {
+    char response[200];
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    int book_index = -1;
+    for (int i = 0; i < book_count; i++) {
+        if (books[i].id == book_id) {
+            book_index = i;
+            break;
+        }
+    }
+    
+    if (book_index == -1) {
+        strcpy(response, "ERROR: Book not found\n");
+    }
+    else if (books[book_index].available) {
+        strcpy(response, "ERROR: Book is not borrowed\n");
+    }
+    else if (books[book_index].borrowed_by != user_id) {
+        strcpy(response, "ERROR: Book was not borrowed by this user\n");
+    }
+    else {
+        books[book_index].available = 1;
+        books[book_index].borrowed_by = 0;
+        
+        // Update user's borrowed count
+        for (int i = 0; i < user_count; i++) {
+            if (users[i].id == user_id) {
+                users[i].borrowed_count--;
+                break;
+            }
+        }
+        
+        sprintf(response, "SUCCESS: Book '%s' returned successfully\n", 
+                books[book_index].title);
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
+
+void add_book(int client_socket, char* title, char* author, char* isbn) {
+    char response[200];
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    if (book_count >= MAX_BOOKS) {
+        strcpy(response, "ERROR: Library is full\n");
+    }
+    else {
+        books[book_count].id = book_count + 1;
+        strcpy(books[book_count].title, title);
+        strcpy(books[book_count].author, author);
+        strcpy(books[book_count].isbn, isbn);
+        books[book_count].available = 1;
+        books[book_count].borrowed_by = 0;
+        book_count++;
+        
+        sprintf(response, "SUCCESS: Book '%s' added successfully with ID %d\n", 
+                title, book_count);
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
+
+void register_user(int client_socket, char* name, char* email) {
+    char response[200];
+    
+    pthread_mutex_lock(&data_mutex);
+    
+    if (user_count >= MAX_USERS) {
+        strcpy(response, "ERROR: Maximum users reached\n");
+    }
+    else {
+        users[user_count].id = user_count + 1;
+        strcpy(users[user_count].name, name);
+        strcpy(users[user_count].email, email);
+        users[user_count].borrowed_count = 0;
+        user_count++;
+        
+        sprintf(response, "SUCCESS: User '%s' registered with ID %d\n", 
+                name, user_count);
+    }
+    
+    pthread_mutex_unlock(&data_mutex);
+    send_response(client_socket, response);
+}
